@@ -1,58 +1,82 @@
 pipeline {
     agent any
-
+    
     environment {
-        PYTHON_VIRTUAL_ENV = 'venv'
+        PATH = "/home/jenkins/.local/bin:${env.PATH}"
+        REPO_URL = 'https://github.com/Modou255/mon-api-python.git'
+        ANSIBLE_INVENTORY = 'ansible/inventory.ini'
+        ANSIBLE_PLAYBOOK = 'ansible/deploy.yml'
     }
-
+    
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: 'master', 
+                url: "${REPO_URL}"
             }
         }
-
+        
         stage('Install dependencies') {
             steps {
-                script {
-                    sh 'pip install -r requirements.txt'
-                }
+                sh 'pip install -r requirements.txt'
             }
         }
-
+        
         stage('Run tests') {
             parallel {
                 stage('Unit tests') {
                     steps {
-                        script {
-                            sh 'pytest --cov=app tests/ --junitxml=results.xml'
-                        }
+                        sh 'pytest tests/ -v'
                     }
                 }
                 stage('Coverage') {
                     steps {
-                        script {
-                            sh 'pytest --cov=app tests/'
-                        }
+                        sh 'pytest --cov=app tests/'
                     }
                 }
             }
+            post {
+                always {
+                    junit '**/test-reports/*.xml'
+                }
+                failure {
+                    emailext body: 'Les tests ont échoué dans ${BUILD_URL}', 
+                    subject: 'Échec des tests - ${JOB_NAME}', 
+                    to: 'team@example.com'
+                }
+            }
         }
-
+        
         stage('Deploy') {
             when {
-                branch 'master'
+                expression { currentBuild.resultIsBetterOrEqualTo('SUCCESS') }
             }
             steps {
-                // Les étapes de déploiement vont ici
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'ansible-ssh-key',
+                    keyFileVariable: 'SSH_KEY'
+                )]) {
+                    sh """
+                    export ANSIBLE_HOST_KEY_CHECKING=False
+                    ansible-playbook -i ${ANSIBLE_INVENTORY} ${ANSIBLE_PLAYBOOK} \
+                    --private-key=${SSH_KEY} \
+                    -e repository_url=${REPO_URL}
+                    """
+                }
             }
         }
     }
-
+    
     post {
-        always {
-            junit '**/results.xml'
-            slackSend(channel: '#devops', color: 'danger', message: 'Pipeline échouée', tokenCredentialId: 'slack-api-token')
+        failure {
+            slackSend channel: '#devops', 
+            color: 'danger', 
+            message: "Build ${BUILD_NUMBER} a échoué: ${BUILD_URL}"
+        }
+        success {
+            slackSend channel: '#devops', 
+            color: 'good', 
+            message: "Build ${BUILD_NUMBER} réussi: ${BUILD_URL}"
         }
     }
 }
