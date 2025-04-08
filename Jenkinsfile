@@ -2,6 +2,7 @@ pipeline {
     agent any
     
     environment {
+        PATH = "/home/jenkins/.local/bin:${env.PATH}"
         REPO_URL = 'https://github.com/Modou255/mon-api-python.git'
         ANSIBLE_INVENTORY = 'ansible/inventory.ini'
         ANSIBLE_PLAYBOOK = 'ansible/deploy.yml'
